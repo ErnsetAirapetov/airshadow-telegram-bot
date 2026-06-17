@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 from app.database.crud.subscription import create_trial_subscription
 
@@ -233,3 +233,31 @@ def test_is_trial_already_used_gate():
     # не платил, PENDING-триал (повторная попытка оплаты) → можно
     pending_trial = Subscription(status=SubscriptionStatus.PENDING.value, is_trial=True)
     assert _user(False, pending_trial).is_trial_already_used() is False
+
+
+async def test_get_renewable_trial_subscription_returns_latest_trial():
+    from app.database.crud.subscription import get_renewable_trial_subscription
+
+    trial = SimpleNamespace(id=5, user_id=7, is_trial=True, status='expired')
+    result_mock = MagicMock()
+    result_mock.scalar_one_or_none.return_value = trial
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result_mock)
+
+    sub = await get_renewable_trial_subscription(db, 7)
+
+    assert sub is trial
+    db.execute.assert_awaited_once()
+
+
+async def test_get_renewable_trial_subscription_none_when_absent():
+    from app.database.crud.subscription import get_renewable_trial_subscription
+
+    result_mock = MagicMock()
+    result_mock.scalar_one_or_none.return_value = None
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result_mock)
+
+    sub = await get_renewable_trial_subscription(db, 7)
+
+    assert sub is None

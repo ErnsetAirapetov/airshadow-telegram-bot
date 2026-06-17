@@ -2656,6 +2656,24 @@ async def get_subscription_by_user_and_tariff(
     return result.scalar_one_or_none()
 
 
+async def get_renewable_trial_subscription(db: AsyncSession, user_id: int) -> Subscription | None:
+    """Latest trial subscription for the user, of ANY status (incl. expired/disabled).
+
+    Renewal fallback: the generic resolver only auto-selects a single ACTIVE
+    subscription, so an expired trial is invisible and the «Продлить» button
+    dead-ends — users then buy a fresh subscription, spawning a second Remnawave
+    user and a new link. This lets the renewal flow recover the trial and convert
+    it in place (same Remnawave link).
+    """
+    result = await db.execute(
+        select(Subscription)
+        .where(Subscription.user_id == user_id, Subscription.is_trial.is_(True))
+        .order_by(Subscription.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def deactivate_user_trial_subscriptions(
     db: AsyncSession,
     user_id: int,

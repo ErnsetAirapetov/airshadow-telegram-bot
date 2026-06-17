@@ -2154,6 +2154,7 @@ async def show_tariff_extend(
     callback: types.CallbackQuery,
     db_user: User,
     db: AsyncSession,
+    state: FSMContext = None,
 ):
     """Показывает экран продления по текущему тарифу."""
     get_texts(db_user.language)
@@ -2199,6 +2200,16 @@ async def show_tariff_extend(
                 return
             if active_subs:
                 subscription = active_subs[0]
+            elif state is not None:
+                # Renewal of a non-active (expired/disabled) trial: the active-only
+                # auto-select can't see it. handle_extend_subscription pins it in
+                # FSM — resolve by that id (status-agnostic) so it converts in place
+                # instead of dead-ending to "Подписка не найдена".
+                _data = await state.get_data()
+                _fsm_id = _data.get('active_subscription_id')
+                subscription = (
+                    await get_subscription_by_id_for_user(db, _fsm_id, db_user.id) if _fsm_id else None
+                )
             else:
                 subscription = None
     else:
@@ -2311,7 +2322,7 @@ async def select_tariff_extend_period(
 
     # Кнопка «Назад» шлёт tariff_extend:{id} без периода — показываем экран выбора периода
     if len(parts) < 3:
-        await show_tariff_extend(callback, db_user, db)
+        await show_tariff_extend(callback, db_user, db, state)
         return
 
     period = int(parts[2])
