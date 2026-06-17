@@ -1631,7 +1631,22 @@ async def handle_extend_subscription(
     if settings.is_multi_tariff_enabled():
         subscription, _sub_id = await _resolve_subscription(callback, db_user, db, state)
         if subscription is None:
-            return
+            # Renewal fallback: an EXPIRED/disabled trial isn't "active", so the
+            # generic resolver returns None and this button dead-ends → the user
+            # buys a fresh subscription (new Remnawave user + link). When the user
+            # has NO active subscription, recover their trial so it converts in
+            # place. Gated on "no active subs" to avoid hijacking a multi-sub picker.
+            from app.database.crud.subscription import (
+                get_active_subscriptions_by_user_id,
+                get_renewable_trial_subscription,
+            )
+
+            if not await get_active_subscriptions_by_user_id(db, db_user.id):
+                subscription = await get_renewable_trial_subscription(db, db_user.id)
+            if subscription is None:
+                return
+            if state is not None:
+                await state.update_data(active_subscription_id=subscription.id)
     else:
         subscription = db_user.subscription
 
@@ -1659,7 +1674,7 @@ async def handle_extend_subscription(
         if subscription.tariff_id and settings.is_tariffs_mode():
             from .tariff_purchase import show_tariff_extend
 
-            await show_tariff_extend(callback, db_user, db)
+            await show_tariff_extend(callback, db_user, db, state)
             return
         # Триал без тарифа — предлагаем выбрать
         await callback.message.edit_text(
@@ -1696,7 +1711,7 @@ async def handle_extend_subscription(
             # У подписки есть тариф - перенаправляем на продление по тарифу
             from .tariff_purchase import show_tariff_extend
 
-            await show_tariff_extend(callback, db_user, db)
+            await show_tariff_extend(callback, db_user, db, state)
             return
 
     if settings.is_tariffs_mode():
