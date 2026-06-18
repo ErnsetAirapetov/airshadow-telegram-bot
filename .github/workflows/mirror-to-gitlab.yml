@@ -1,0 +1,40 @@
+name: Mirror to GitLab
+
+# Зеркалирование GitHub -> GitLab (gitlab.com/airshadow/telegram-bot).
+# Раз в сутки в 20:00 МСК + ручной запуск из вкладки Actions.
+# Внимание: scheduled-воркфлоу запускается только из дефолтной ветки репозитория.
+# Для этого форка дефолтной назначена airshadow-prod, поэтому файл живёт здесь,
+# а ветка main остаётся чистой для fast-forward синка из апстрима.
+on:
+  schedule:
+    - cron: '0 17 * * *'   # 17:00 UTC = 20:00 МСК (UTC+3), ежедневно
+  workflow_dispatch: {}     # ручной запуск кнопкой "Run workflow"
+
+# Не даём двум зеркалированиям идти одновременно (на случай ручного запуска поверх крона)
+concurrency:
+  group: mirror-to-gitlab
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (все ветки и теги)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # обязательно: тянем всю историю, все ветки и теги
+
+      - name: Push mirror to GitLab
+        env:
+          GITLAB_USER: ${{ secrets.GITLAB_USER }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Креды передаём HTTP-заголовком Basic, а НЕ внутри URL —
+          # иначе спецсимволы в токене (например "/") ломают разбор URL.
+          AUTH=$(printf '%s:%s' "$GITLAB_USER" "$GITLAB_TOKEN" | base64 -w0)
+          git -c http.extraheader="AUTHORIZATION: basic ${AUTH}" \
+            push --prune \
+            "https://gitlab.com/airshadow/telegram-bot.git" \
+            "+refs/remotes/origin/*:refs/heads/*" \
+            "+refs/tags/*:refs/tags/*"
