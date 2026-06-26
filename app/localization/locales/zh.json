@@ -840,7 +840,7 @@
   "AUTOPAY_STATUS_CARD_ACTIVE": "✅ 已启用 — 将自动从银行卡扣款",
   "AUTOPAY_STATUS_NO_CARD": "✅ 已启用 — 订阅将自动续订",
   "AUTOPAY_STATUS_OFF": "❌ 已禁用 — 请别忘了手动续订！",
-  "AUTOPAY_ACTION_CHECK_BALANCE": "💰 请确保余额充足：{balance}",
+  "AUTOPAY_ACTION_CHECK_BALANCE": "💰 您当前的余额：{balance}",
   "AUTOPAY_ACTION_ENABLE": "💡 请启用自动支付或手动续订",
   "AUTOPAY_ACTION_RENEW": "💡 请手动续订",
   "AUTOPAY_SUCCESS": "\n✅<b>自动支付成功</b>\n\n您的订阅已自动延长{days}天。\n已从余额扣除：{amount}\n",
