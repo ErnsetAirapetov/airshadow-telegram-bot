@@ -567,3 +567,127 @@ async def test_subscription_days_promo_keeps_trial_a_trial(monkeypatch):
     assert trial_sub.is_trial is True
     # The promo days are still applied to the (still-trial) subscription.
     extend_mock.assert_awaited_once_with(mock_db_session, trial_sub, 14)
+
+
+async def _balance_promocode():
+    return SimpleNamespace(
+        id=21,
+        code='OVERREDEEM',
+        type=PromoCodeType.BALANCE.value,
+        balance_bonus_kopeks=10000,
+        subscription_days=0,
+        tariff_id=None,
+        promo_group_id=None,
+        promo_group=None,
+        first_purchase_only=False,
+        max_uses=1,
+        current_uses=0,
+        is_active=True,
+        is_valid=True,
+        valid_until=None,
+    )
+
+
+async def test_activation_aborts_when_usage_slot_cannot_be_claimed(monkeypatch):
+    """F18/F17: the atomic conditional increment is the authoritative gate.
+
+    If the UPDATE ... WHERE current_uses < max_uses affects 0 rows (another activation
+    claimed the last slot between the is_valid read and now), activation must abort with
+    'used' and roll back — never apply the effect. This is what stops two concurrent
+    users from both redeeming a max_uses=1 code.
+    """
+    sample_user = SimpleNamespace(
+        id=1,
+        telegram_id=1,
+        username='u',
+        full_name='U',
+        balance_kopeks=0,
+        language='ru',
+        has_had_paid_subscription=False,
+        total_spent_kopeks=0,
+    )
+    promocode = await _balance_promocode()
+
+    mock_db_session = AsyncMock()
+    # The only db.execute in the flow before effects is the slot-claim UPDATE.
+    # Simulate "no slot left" -> rowcount 0.
+    mock_db_session.execute = AsyncMock(return_value=SimpleNamespace(rowcount=0))
+
+    add_balance = AsyncMock()
+    monkeypatch.setattr('app.services.promocode_service.RemnaWaveService', lambda: SimpleNamespace())
+    monkeypatch.setattr('app.services.promocode_service.SubscriptionService', lambda: SimpleNamespace())
+    monkeypatch.setattr('app.services.promocode_service.get_user_by_id', AsyncMock(return_value=sample_user))
+    monkeypatch.setattr('app.services.promocode_service.get_promocode_by_code', AsyncMock(return_value=promocode))
+    monkeypatch.setattr('app.services.promocode_service.check_user_promocode_usage', AsyncMock(return_value=False))
+    monkeypatch.setattr('app.database.crud.promocode.count_user_recent_activations', AsyncMock(return_value=0))
+    monkeypatch.setattr('app.services.promocode_service.create_promocode_use', AsyncMock(return_value=object()))
+    monkeypatch.setattr('app.services.promocode_service.add_user_balance', add_balance)
+
+    service = PromoCodeService()
+    result = await service.activate_promocode(mock_db_session, sample_user.id, promocode.code)
+
+    assert result == {'success': False, 'error': 'used'}
+    add_balance.assert_not_awaited()  # effect never applied when the slot wasn't claimed
+    mock_db_session.rollback.assert_awaited()
+
+
+async def test_trial_promo_refunds_instead_of_fake_success_when_subscription_exists(monkeypatch):
+    """F15: a trial promo that can't create/extend must raise (refund), not fake success.
+
+    Previously it appended 'у вас уже есть активная подписка' and returned success=True,
+    burning the code. Now it raises trial_subscription_exists -> the reserved use + claim
+    are rolled back and the user gets a mapped, retryable error.
+    """
+    sample_user = SimpleNamespace(
+        id=1,
+        telegram_id=1,
+        username='u',
+        full_name='U',
+        balance_kopeks=0,
+        language='ru',
+        has_had_paid_subscription=True,
+        total_spent_kopeks=0,
+    )
+    promocode = SimpleNamespace(
+        id=22,
+        code='TRIALX',
+        type=PromoCodeType.TRIAL_SUBSCRIPTION.value,
+        balance_bonus_kopeks=0,
+        subscription_days=7,
+        tariff_id=None,
+        promo_group_id=None,
+        promo_group=None,
+        first_purchase_only=False,
+        max_uses=10,
+        current_uses=0,
+        is_active=True,
+        is_valid=True,
+        valid_until=None,
+    )
+    # Existing subscription of a DIFFERENT/none tariff -> can_create_new becomes False.
+    existing_sub = SimpleNamespace(id=5, is_trial=False, status='active', tariff=None, tariff_id=99, days_left=10)
+
+    mock_db_session = AsyncMock()
+    mock_db_session.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))  # slot claimed OK
+
+    monkeypatch.setattr('app.services.promocode_service.RemnaWaveService', lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        'app.services.promocode_service.SubscriptionService',
+        lambda: SimpleNamespace(create_remnawave_user=AsyncMock(), update_remnawave_user=AsyncMock()),
+    )
+    monkeypatch.setattr('app.services.promocode_service.get_user_by_id', AsyncMock(return_value=sample_user))
+    monkeypatch.setattr('app.services.promocode_service.get_promocode_by_code', AsyncMock(return_value=promocode))
+    monkeypatch.setattr('app.services.promocode_service.check_user_promocode_usage', AsyncMock(return_value=False))
+    monkeypatch.setattr('app.database.crud.promocode.count_user_recent_activations', AsyncMock(return_value=0))
+    monkeypatch.setattr('app.services.promocode_service.create_promocode_use', AsyncMock(return_value=object()))
+    monkeypatch.setattr(
+        'app.services.promocode_service.get_subscription_by_user_id', AsyncMock(return_value=existing_sub)
+    )
+    monkeypatch.setattr('app.database.crud.tariff.get_trial_tariff', AsyncMock(return_value=None))
+    monkeypatch.setattr('app.database.crud.tariff.get_tariff_by_id', AsyncMock(return_value=None))
+
+    service = PromoCodeService()
+    result = await service.activate_promocode(mock_db_session, sample_user.id, promocode.code)
+
+    assert result == {'success': False, 'error': 'trial_subscription_exists'}
+    mock_db_session.rollback.assert_awaited()
