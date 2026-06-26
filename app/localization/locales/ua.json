@@ -1017,7 +1017,7 @@
   "HAPP_PLATFORM_MACOS": "🖥️ Mac OS",
   "HAPP_PLATFORM_PC": "💻 ПК",
   "HAPP_PLATFORM_WINDOWS": "💻 Windows",
-  "INSUFFICIENT_BALANCE": "❌ Недостатньо коштів на балансі.  \n   \n   <b>Поповніть баланс на {amount} і спробуйте знову.</b>\n   ",
+  "INSUFFICIENT_BALANCE": "❌ Недостатньо коштів на балансі. Поповніть баланс на {amount} і спробуйте знову.",
   "INVALID_AMOUNT": "❌ Невірна сума",
   "LANGUAGE_PROMPT": "🌐 Оберіть мову інтерфейсу:",
   "LANGUAGE_SELECTED": "🌐 Мову інтерфейсу встановлено: <b>Українська</b>",

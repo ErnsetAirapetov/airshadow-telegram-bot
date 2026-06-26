@@ -1079,7 +1079,7 @@
   "HAPP_PLATFORM_MACOS": "🖥️ Mac OS",
   "HAPP_PLATFORM_PC": "💻 PC",
   "HAPP_PLATFORM_WINDOWS": "💻 Windows",
-  "INSUFFICIENT_BALANCE": "❌ Insufficient balance.\n\nTop up {amount} and try again.",
+  "INSUFFICIENT_BALANCE": "❌ Insufficient balance. Top up {amount} and try again.",
   "INVALID_AMOUNT": "❌ Invalid amount",
   "LANGUAGE_PROMPT": "🌐 Choose the interface language:",
   "LANGUAGE_SELECTED": "🌐 Interface language set: <b>English</b>",
