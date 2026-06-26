@@ -1108,7 +1108,7 @@
   "INFO_PAGE_EMPTY": "متن این صفحه هنوز اضافه نشده.",
   "INFO_PAGE_NOT_AVAILABLE": "این صفحه موقتاً در دسترس نیست.",
   "INFO_SECTION_NOT_AVAILABLE": "این بخش موقتاً در دسترس نیست.",
-  "INSUFFICIENT_BALANCE": "❌ موجودی ناکافی.\n    \n    <b>موجودی را {amount} شارژ و دوباره تلاش کنید.</b>\n    ",
+  "INSUFFICIENT_BALANCE": "❌ موجودی ناکافی. موجودی را {amount} شارژ کنید و دوباره تلاش کنید.",
   "INVALID_AMOUNT": "❌ مبلغ نامعتبر",
   "LANGUAGE_PROMPT": "🌐 زبان رابط را انتخاب کنید:",
   "LANGUAGE_SELECTED": "🌐 زبان رابط انتخاب شد: <b>فارسی</b>",
