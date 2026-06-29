@@ -1221,6 +1221,7 @@ class MonitoringService:
                             effect_type='percent_discount',
                         )
                         success = await self._send_expired_discount_notification(
+                            db,
                             user,
                             subscription,
                             percent,
@@ -1250,6 +1251,7 @@ class MonitoringService:
                                 effect_type='percent_discount',
                             )
                             success = await self._send_expired_discount_notification(
+                                db,
                                 user,
                                 subscription,
                                 percent,
@@ -2092,6 +2094,7 @@ class MonitoringService:
 
     async def _send_expired_discount_notification(
         self,
+        db: AsyncSession,
         user: User,
         subscription: Subscription,
         percent: int,
@@ -2107,22 +2110,44 @@ class MonitoringService:
             if settings.is_multi_tariff_enabled() and hasattr(subscription, 'tariff') and subscription.tariff:
                 tariff_label = f' «{subscription.tariff.name}»'
 
+            # Pre-apply the win-back discount up-front so the cabinet checkout shows the
+            # reduced price on the very first tap. Telegram can't both run a callback AND
+            # open the Mini App, so granting here — instead of requiring a separate "claim"
+            # tap — removes the extra step for the churned user. Only ever upgrades the
+            # active promo, never clobbers a larger one. Expiry = the offer's valid window.
+            try:
+                source = 'expired_discount_wave2' if wave == 'second' else 'expired_discount_wave3'
+                if percent > get_user_active_promo_discount_percent(user):
+                    user.promo_offer_discount_percent = percent
+                    user.promo_offer_discount_source = source
+                    user.promo_offer_discount_expires_at = expires_at
+                    user.updated_at = datetime.now(UTC)
+                    await db.flush()
+            except Exception as pre_grant_exc:
+                logger.warning(
+                    'Не удалось предварительно применить win-back скидку пользователю',
+                    telegram_id=user.telegram_id,
+                    exc=pre_grant_exc,
+                )
+
             if wave == 'second':
                 template = texts.get(
                     'SUBSCRIPTION_EXPIRED_SECOND_WAVE',
                     (
-                        '🔥 <b>Скидка {percent}% на продление{tariff_label}</b>\n\n'
-                        'Активируйте предложение, чтобы получить дополнительную скидку. '
-                        'Она суммируется с вашей промогруппой и действует до {expires_at}.'
+                        '🔥 <b>Скидка {percent}% уже закреплена за вами{tariff_label}</b>\n\n'
+                        'Возвращайтесь — мы сохранили персональную скидку {percent}% на подписку. '
+                        'Она суммируется со скидками вашей промогруппы.\n\n'
+                        '⏳ Действует до {expires_at}. Нажмите кнопку ниже — цена в оформлении уже со скидкой.'
                     ),
                 )
             else:
                 template = texts.get(
                     'SUBSCRIPTION_EXPIRED_THIRD_WAVE',
                     (
-                        '🎁 <b>Индивидуальная скидка {percent}%{tariff_label}</b>\n\n'
-                        'Прошло {trigger_days} дней без подписки — возвращайтесь и активируйте дополнительную скидку. '
-                        'Она суммируется с промогруппой и действует до {expires_at}.'
+                        '🎁 <b>Лучшая цена для вас: скидка {percent}%{tariff_label}</b>\n\n'
+                        'Прошло {trigger_days} дней — возвращаем вам доступ со скидкой {percent}%. '
+                        'Это наше максимальное предложение, и оно суммируется со скидками промогруппы.\n\n'
+                        '⏳ Только до {expires_at}. Нажмите — и оформите подписку по сниженной цене.'
                     ),
                 )
 
@@ -2140,8 +2165,16 @@ class MonitoringService:
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
+                        # Cabinet mode → opens the cabinet subscription/checkout page directly
+                        # (discount already applied above). Non-cabinet → falls back to the
+                        # claim_discount callback, which (re)applies the discount and offers buy.
                         build_miniapp_or_callback_button(
-                            text='🎁 Получить скидку', callback_data=f'claim_discount_{offer_id}'
+                            text=texts.t(
+                                'SUBSCRIPTION_WINBACK_CHECKOUT_BUTTON',
+                                '💳 Оформить со скидкой {percent}%',
+                            ).format(percent=percent),
+                            callback_data=f'claim_discount_{offer_id}',
+                            cabinet_path='/subscription',
                         )
                     ],
                     [

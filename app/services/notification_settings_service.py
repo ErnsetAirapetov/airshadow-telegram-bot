@@ -23,13 +23,13 @@ class NotificationSettingsService:
         'expired_1d': {'enabled': True},
         'expired_second_wave': {
             'enabled': True,
-            'discount_percent': 10,
-            'valid_hours': 24,
+            'discount_percent': 20,
+            'valid_hours': 48,
         },
         'expired_third_wave': {
             'enabled': True,
-            'discount_percent': 20,
-            'valid_hours': 24,
+            'discount_percent': 35,
+            'valid_hours': 72,
             'trigger_days': 5,
         },
     }
@@ -148,11 +148,11 @@ class NotificationSettingsService:
 
     @classmethod
     def get_second_wave_discount_percent(cls) -> int:
-        value = cls._get('expired_second_wave').get('discount_percent', 10)
+        value = cls._get('expired_second_wave').get('discount_percent', 20)
         try:
             return max(0, min(100, int(value)))
         except (TypeError, ValueError):
-            return 10
+            return 20
 
     @classmethod
     def set_second_wave_discount_percent(cls, percent: int) -> bool:
@@ -164,11 +164,11 @@ class NotificationSettingsService:
 
     @classmethod
     def get_second_wave_valid_hours(cls) -> int:
-        value = cls._get('expired_second_wave').get('valid_hours', 24)
+        value = cls._get('expired_second_wave').get('valid_hours', 48)
         try:
             return max(1, min(168, int(value)))
         except (TypeError, ValueError):
-            return 24
+            return 48
 
     @classmethod
     def set_second_wave_valid_hours(cls, hours: int) -> bool:
@@ -188,11 +188,11 @@ class NotificationSettingsService:
 
     @classmethod
     def get_third_wave_discount_percent(cls) -> int:
-        value = cls._get('expired_third_wave').get('discount_percent', 20)
+        value = cls._get('expired_third_wave').get('discount_percent', 35)
         try:
             return max(0, min(100, int(value)))
         except (TypeError, ValueError):
-            return 20
+            return 35
 
     @classmethod
     def set_third_wave_discount_percent(cls, percent: int) -> bool:
@@ -204,11 +204,11 @@ class NotificationSettingsService:
 
     @classmethod
     def get_third_wave_valid_hours(cls) -> int:
-        value = cls._get('expired_third_wave').get('valid_hours', 24)
+        value = cls._get('expired_third_wave').get('valid_hours', 72)
         try:
             return max(1, min(168, int(value)))
         except (TypeError, ValueError):
-            return 24
+            return 72
 
     @classmethod
     def set_third_wave_valid_hours(cls, hours: int) -> bool:
