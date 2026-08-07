@@ -5,12 +5,14 @@ Root cause: the renewal resolver only auto-selects a single ACTIVE subscription,
 so an expired trial returns None → «Продлить» silently returns → users fall back
 to «Купить» → confirm_tariff_purchase → new sub + new link.
 """
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
@@ -46,8 +48,9 @@ async def test_handle_extend_falls_back_to_expired_trial(monkeypatch):
 
     await purchase.handle_extend_subscription(callback, db_user, db, state)
 
-    state.update_data.assert_awaited_with(active_subscription_id=99)
-    show_extend.assert_awaited_once()
+    # id восстановленного триала передаётся в экран продления явно —
+    # хвост callback_data здесь не является id подписки.
+    show_extend.assert_awaited_once_with(callback, db_user, db, subscription_id=99)
 
 
 async def test_handle_extend_no_fallback_when_active_sub_exists(monkeypatch):
@@ -81,7 +84,10 @@ async def test_handle_extend_no_fallback_when_active_sub_exists(monkeypatch):
     show_extend.assert_not_awaited()
 
 
-async def test_show_tariff_extend_resolves_expired_trial_via_fsm(monkeypatch):
+async def test_show_tariff_extend_resolves_expired_trial_by_explicit_id(monkeypatch):
+    """Экран продления обязан резолвить подписку по явному ``subscription_id``
+    без оглядки на статус — иначе восстановленный истёкший триал упирается в
+    «Подписка не найдена» (авто-выбор смотрит только на активные)."""
     from app.handlers.subscription import tariff_purchase
 
     monkeypatch.setattr(type(tariff_purchase.settings), 'is_multi_tariff_enabled', lambda self: True)
@@ -94,21 +100,22 @@ async def test_show_tariff_extend_resolves_expired_trial_via_fsm(monkeypatch):
     monkeypatch.setattr(tariff_purchase, 'get_tariff_extend_keyboard', lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(tariff_purchase, 'format_traffic', lambda *a, **k: '500 ГБ')
 
-    state = AsyncMock()
-    state.get_data = AsyncMock(return_value={'active_subscription_id': 99})
     callback = SimpleNamespace(
         data='subscription_extend',
         message=SimpleNamespace(edit_text=AsyncMock()),
         answer=AsyncMock(),
     )
     db_user = SimpleNamespace(
-        id=7, language='ru', promo_group_id=None,
-        get_primary_promo_group=lambda: None, promo_group=None,
+        id=7,
+        language='ru',
+        promo_group_id=None,
+        get_primary_promo_group=lambda: None,
+        promo_group=None,
     )
     db = AsyncMock()
 
-    await tariff_purchase.show_tariff_extend(callback, db_user, db, state)
+    await tariff_purchase.show_tariff_extend(callback, db_user, db, subscription_id=99)
 
-    # Resolved the expired trial via FSM and rendered the extend screen
+    # Resolved the expired trial by explicit id and rendered the extend screen
     resolve_by_id.assert_awaited_with(db, 99, 7)
     callback.message.edit_text.assert_awaited()
