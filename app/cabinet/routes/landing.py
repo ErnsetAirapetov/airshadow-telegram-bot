@@ -123,6 +123,24 @@ def _validate_contact(contact_type: str, contact_value: str) -> None:
         raise ValueError('Invalid Telegram username format')
 
 
+def _normalize_contact(contact_type: str, contact_value: str) -> str:
+    """Приводит email к каноническому виду до того, как он попадёт в users.email.
+
+    Весь кабинет ищет пользователя как `func.lower(User.email)`, а покупка с
+    лендинга раньше писала значение как есть. Клиент, зарегистрированный как
+    `mail@x.ru`, при покупке с `Mail@x.ru` получал ВТОРОЙ аккаунт, после чего
+    вход/регистрация/восстановление пароля падали с MultipleResultsFound → 500.
+    Нормализация здесь — первый из двух барьеров; второй, уникальный индекс по
+    lower(email), стоит в миграции 0104.
+
+    Telegram-username не трогаем: он регистронезависим на стороне Telegram,
+    но нигде не используется как ключ поиска пользователя.
+    """
+    if contact_type == 'email':
+        return contact_value.strip().lower()
+    return contact_value.strip()
+
+
 class PurchaseRequest(BaseModel):
     tariff_id: int
     period_days: int
@@ -140,10 +158,14 @@ class PurchaseRequest(BaseModel):
 
     @model_validator(mode='after')
     def validate_contacts(self) -> 'PurchaseRequest':
+        self.contact_value = _normalize_contact(self.contact_type, self.contact_value)
         _validate_contact(self.contact_type, self.contact_value)
         if self.is_gift:
             if not self.gift_recipient_type or not self.gift_recipient_value:
                 raise ValueError('Gift recipient type and value are required for gift purchases')
+            self.gift_recipient_value = _normalize_contact(
+                self.gift_recipient_type, self.gift_recipient_value
+            )
             _validate_contact(self.gift_recipient_type, self.gift_recipient_value)
         return self
 
@@ -184,6 +206,7 @@ class GiftClaimRequest(BaseModel):
 
     @model_validator(mode='after')
     def validate_email(self) -> 'GiftClaimRequest':
+        self.email = _normalize_contact('email', self.email)
         _validate_contact('email', self.email)
         return self
 

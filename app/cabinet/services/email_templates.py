@@ -1924,7 +1924,10 @@ class EmailNotificationTemplates:
         period_days = context.get('period_days', 0)
         cabinet_url = html.escape(context.get('cabinet_url', ''))
         cabinet_email = html.escape(context.get('cabinet_email', ''))
-        cabinet_password = context.get('cabinet_password', '')
+        # Экранируем, как в _guest_gift_received_template. Сейчас безопасно —
+        # secrets.token_urlsafe не выдаёт & < >, — но при смене алфавита
+        # генератора неэкранированный пароль сломал бы вёрстку письма.
+        cabinet_password = html.escape(context.get('cabinet_password', ''))
 
         subjects = {
             'ru': 'Ваша VPN подписка готова',
