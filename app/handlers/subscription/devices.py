@@ -64,7 +64,17 @@ async def _resolve_subscription(callback, db_user, db, state=None):
 
 
 def _get_remnawave_uuid(subscription, db_user):
-    """Get remnawave_uuid from subscription (multi-tariff) or user (legacy)."""
+    """Get remnawave_uuid for device operations.
+
+    Multi-tariff: each subscription owns its OWN panel user, so use the
+    subscription's UUID and do NOT fall back to the user-level UUID — the
+    fallback would read/enforce HWID devices against another tariff's panel
+    user, making the device limit look shared across tariffs (баг с общим
+    лимитом «по наименьшему тарифу»). Single-tariff: one panel user per user,
+    fall back to it as before.
+    """
+    if subscription is not None and settings.is_multi_tariff_enabled():
+        return getattr(subscription, 'remnawave_uuid', None)
     return getattr(subscription, 'remnawave_uuid', None) or db_user.remnawave_uuid
 
 
@@ -321,13 +331,17 @@ async def confirm_change_devices(
         )
         return
 
-    # Минимум при уменьшении всегда 1 (device_limit тарифа — это "включено при покупке", а не нижняя граница)
-    if new_devices_count < 1:
+    # По умолчанию ниже включённого в тариф опускать нельзя
+    # (ALLOW_DEVICES_BELOW_TARIFF_LIMIT=True возвращает прежний минимум 1).
+    from app.utils.subscription_utils import resolve_min_device_limit
+
+    min_devices_count = resolve_min_device_limit(tariff)
+    if new_devices_count < min_devices_count:
         await callback.answer(
             texts.t(
                 'DEVICES_MIN_LIMIT_REACHED',
                 '⚠️ Минимальное количество устройств: {limit}',
-            ).format(limit=1),
+            ).format(limit=min_devices_count),
             show_alert=True,
         )
         return
@@ -556,13 +570,17 @@ async def execute_change_devices(
     else:
         price_per_device = settings.PRICE_PER_DEVICE
 
-    # Минимум при уменьшении всегда 1 (device_limit тарифа — это "включено при покупке", а не нижняя граница)
-    if new_devices_count < 1:
+    # По умолчанию ниже включённого в тариф опускать нельзя
+    # (ALLOW_DEVICES_BELOW_TARIFF_LIMIT=True возвращает прежний минимум 1).
+    from app.utils.subscription_utils import resolve_min_device_limit
+
+    min_devices_count = resolve_min_device_limit(tariff)
+    if new_devices_count < min_devices_count:
         await callback.answer(
             texts.t(
                 'DEVICES_MIN_LIMIT_REACHED',
                 '⚠️ Минимальное количество устройств: {limit}',
-            ).format(limit=1),
+            ).format(limit=min_devices_count),
             show_alert=True,
         )
         return

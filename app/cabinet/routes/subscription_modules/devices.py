@@ -54,8 +54,14 @@ router = APIRouter()
 
 
 def _resolve_panel_uuid(subscription: Subscription | None, user: User) -> str | None:
-    """Resolve RemnaWave panel UUID: per-subscription in multi-tariff, user-level otherwise."""
-    if settings.is_multi_tariff_enabled() and subscription and subscription.remnawave_uuid:
+    """Resolve RemnaWave panel UUID: per-subscription in multi-tariff, user-level otherwise.
+
+    Multi-tariff: each subscription is its OWN panel user — return the sub's UUID
+    and do NOT fall back to ``user.remnawave_uuid`` when it's null. The fallback
+    would read/operate on another tariff's panel user, making HWID devices/limit
+    look shared across tariffs (баг с общим лимитом «по наименьшему тарифу»).
+    """
+    if settings.is_multi_tariff_enabled() and subscription is not None:
         return subscription.remnawave_uuid
     return user.remnawave_uuid
 
@@ -1177,9 +1183,19 @@ async def get_device_reduction_info(
             'connected_devices_count': 0,
         }
 
-    # Minimum device limit for decrease is always 1 (tariff's device_limit is the
-    # number of devices included at purchase, not the floor for decrease)
-    min_device_limit = 1
+    # По умолчанию нижняя граница уменьшения — лимит устройств тарифа
+    # (ALLOW_DEVICES_BELOW_TARIFF_LIMIT=True возвращает прежнее поведение с 1).
+    # Тариф грузим явно: ленивый доступ к subscription.tariff в async-сессии
+    # падает MissingGreenlet.
+    from app.utils.subscription_utils import resolve_min_device_limit
+
+    _tariff = None
+    if subscription.tariff_id:
+        from app.database.crud.tariff import get_tariff_by_id
+
+        _tariff = await get_tariff_by_id(db, subscription.tariff_id)
+
+    min_device_limit = resolve_min_device_limit(_tariff)
 
     current_device_limit = subscription.device_limit or 1
 
@@ -1260,9 +1276,19 @@ async def reduce_devices(
             detail='Device reduction is not available for trial subscriptions',
         )
 
-    # Minimum device limit for decrease is always 1 (tariff's device_limit is the
-    # number of devices included at purchase, not the floor for decrease)
-    min_device_limit = 1
+    # По умолчанию нижняя граница уменьшения — лимит устройств тарифа
+    # (ALLOW_DEVICES_BELOW_TARIFF_LIMIT=True возвращает прежнее поведение с 1).
+    # Тариф грузим явно: ленивый доступ к subscription.tariff в async-сессии
+    # падает MissingGreenlet.
+    from app.utils.subscription_utils import resolve_min_device_limit
+
+    _tariff = None
+    if subscription.tariff_id:
+        from app.database.crud.tariff import get_tariff_by_id
+
+        _tariff = await get_tariff_by_id(db, subscription.tariff_id)
+
+    min_device_limit = resolve_min_device_limit(_tariff)
 
     current_device_limit = subscription.device_limit or 1
 

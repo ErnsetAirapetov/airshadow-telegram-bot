@@ -25,6 +25,7 @@ subscription, which is the intended "same-tariff only" semantic.
 A full integration test would need a real DB + FastAPI deps; this pins the
 SOURCE-LEVEL contract — the bug class ("drop include_inactive") is grep-detectable.
 """
+
 from __future__ import annotations
 
 import ast
@@ -32,12 +33,7 @@ from pathlib import Path
 
 
 PURCHASE_PATH = (
-    Path(__file__).resolve().parents[2]
-    / 'app'
-    / 'cabinet'
-    / 'routes'
-    / 'subscription_modules'
-    / 'purchase.py'
+    Path(__file__).resolve().parents[2] / 'app' / 'cabinet' / 'routes' / 'subscription_modules' / 'purchase.py'
 )
 
 
