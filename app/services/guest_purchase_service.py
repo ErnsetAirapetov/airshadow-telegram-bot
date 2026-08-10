@@ -33,6 +33,7 @@ from app.database.models import (
     Transaction,
     TransactionType,
     User,
+    UserStatus,
     _aware,
 )
 from app.services.subscription_service import SubscriptionService
@@ -696,7 +697,21 @@ async def _find_or_create_user(
     This preserves FOR UPDATE locks held by the caller.
     """
     if contact_type == 'email':
-        result = await db.execute(select(User).where(User.email == contact_value))
+        # Ищем БЕЗ учёта регистра и мимо soft-deleted. Раньше здесь было точное
+        # сравнение `User.email == contact_value`, из-за чего покупка с `Mail@x.ru`
+        # не находила существующего `mail@x.ru` и заводила второй аккаунт —
+        # см. docs/superpowers/specs/2026-08-10-bedolaga-email-case-duplicate-accounts.md.
+        # order_by(User.id) — детерминированный выбор, если дубль всё же уцелел
+        # в данных: берём самый старый (основной) аккаунт, а не случайный.
+        email_lower = (contact_value or '').strip().lower()
+        result = await db.execute(
+            select(User)
+            .where(
+                func.lower(User.email) == email_lower,
+                User.status != UserStatus.DELETED.value,
+            )
+            .order_by(User.id)
+        )
         user = result.scalars().first()
         if user:
             is_new_account = False
@@ -719,6 +734,44 @@ async def _find_or_create_user(
                 user.referral_code = await create_unique_referral_code(db)
             return user, is_new_account
 
+        # Живого аккаунта нет — но адрес может держать soft-deleted строка.
+        # Создать вторую строку с тем же email нельзя: на колонке users.email
+        # стоит UNIQUE, и INSERT упал бы IntegrityError'ом, то есть покупка
+        # вернула бы 500. Поэтому возвращаем клиента в его же запись и
+        # РЕАКТИВИРУЕМ её. Раньше запрос не фильтровал status вовсе: удалённая
+        # запись «оживала» с прежним status='deleted', и вход после оплаты
+        # отдавал 401 «Invalid email or password» — клиент платил и не мог войти
+        # (побочная находка A в спеке).
+        deleted_result = await db.execute(
+            select(User)
+            .where(
+                func.lower(User.email) == email_lower,
+                User.status == UserStatus.DELETED.value,
+            )
+            .order_by(User.id)
+        )
+        deleted_user = deleted_result.scalars().first()
+        if deleted_user:
+            plain_password = secrets.token_urlsafe(12)
+            deleted_user.status = UserStatus.ACTIVE.value
+            deleted_user.email = email_lower
+            deleted_user.password_hash = hash_password(plain_password)
+            deleted_user.email_verified = True
+            deleted_user.email_verified_at = datetime.now(UTC)
+            if not deleted_user.promo_group_id:
+                default_group = await _get_or_create_default_promo_group(db)
+                deleted_user.promo_group_id = default_group.id
+            if not deleted_user.referral_code:
+                deleted_user.referral_code = await create_unique_referral_code(db)
+            if purchase:
+                purchase.cabinet_password = plain_password
+            logger.info(
+                'Reactivated soft-deleted email user for guest purchase',
+                user_id=deleted_user.id,
+                email_masked=_mask_email(email_lower),
+            )
+            return deleted_user, True
+
         # Create new email user with verified cabinet account
         plain_password = secrets.token_urlsafe(12)
         # Resolve promo group: prefer tariff's allowed group, fallback to default
@@ -732,7 +785,7 @@ async def _find_or_create_user(
         referral_code = await create_unique_referral_code(db)
         user = User(
             auth_type='email',
-            email=contact_value,
+            email=email_lower,
             email_verified=True,
             email_verified_at=datetime.now(UTC),
             password_hash=hash_password(plain_password),
@@ -746,7 +799,17 @@ async def _find_or_create_user(
                 db.add(user)
                 await db.flush()
         except IntegrityError:
-            result = await db.execute(select(User).where(User.email == contact_value))
+            # Гонка: параллельный запрос успел создать пользователя. Ищем так же
+            # регистронезависимо — с уникальным индексом по lower(email) (миграция
+            # as0001) сюда теперь приводит и коллизия по регистру, а не только точная.
+            result = await db.execute(
+                select(User)
+                .where(
+                    func.lower(User.email) == email_lower,
+                    User.status != UserStatus.DELETED.value,
+                )
+                .order_by(User.id)
+            )
             user = result.scalars().first()
             if user:
                 # Race condition — user was created concurrently
@@ -772,7 +835,7 @@ async def _find_or_create_user(
         logger.info(
             'Created new email user with cabinet account for guest purchase',
             user_id=user.id,
-            email_masked=_mask_email(contact_value),
+            email_masked=_mask_email(email_lower),
         )
         return user, True
 

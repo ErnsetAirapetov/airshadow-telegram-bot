@@ -1432,8 +1432,14 @@ async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     if not email or not email.strip():
         return None
     email_lower = email.strip().lower()
-    result = await db.execute(select(User).where(func.lower(User.email) == email_lower))
-    return result.scalar_one_or_none()
+    # .first() вместо .scalar_one_or_none(): общий хелпер зовут десятки роутов, и
+    # на паре строк, различающихся регистром, он ронял их все в HTTP 500.
+    # order_by(User.id) — стабильный выбор основного (самого старого) аккаунта.
+    # Фильтр по status намеренно не добавляем: часть вызывающих ищет и удалённых.
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == email_lower).order_by(User.id)
+    )
+    return result.scalars().first()
 
 
 async def is_email_taken(db: AsyncSession, email: str, exclude_user_id: int | None = None) -> bool:
@@ -1454,8 +1460,10 @@ async def is_email_taken(db: AsyncSession, email: str, exclude_user_id: int | No
     query = select(User.id).where(func.lower(User.email) == email_lower)
     if exclude_user_id:
         query = query.where(User.id != exclude_user_id)
-    result = await db.execute(query)
-    return result.scalar_one_or_none() is not None
+    result = await db.execute(query.order_by(User.id))
+    # .first(): при дубле по регистру ответ «занят» остаётся верным, а
+    # .scalar_one_or_none() здесь падал с MultipleResultsFound.
+    return result.scalars().first() is not None
 
 
 async def set_email_change_pending(

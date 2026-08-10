@@ -1140,14 +1140,18 @@ async def register_email(
             detail='This email address cannot be linked to your account.',
         )
 
-    # Check if email already exists (case-insensitive, exclude deleted users)
+    # Check if email already exists (case-insensitive, exclude deleted users).
+    # .first() вместо .scalar_one_or_none(): на паре строк, различающихся только
+    # регистром, последний кидал MultipleResultsFound → HTTP 500 во всём email-контуре.
     existing_result = await db.execute(
-        select(User).where(
+        select(User)
+        .where(
             func.lower(User.email) == email_lower,
             User.status != UserStatus.DELETED.value,
         )
+        .order_by(User.id)
     )
-    existing_email_user = existing_result.scalar_one_or_none()
+    existing_email_user = existing_result.scalars().first()
     if existing_email_user:
         if existing_email_user.id == user.id:
             raise HTTPException(
@@ -1396,9 +1400,14 @@ async def register_email_standalone(
             detail='This email address cannot be used for registration.',
         )
 
-    # Проверить что email не занят (без учёта регистра)
-    existing = await db.execute(select(User).where(func.lower(User.email) == email_lower))
-    if existing.scalar_one_or_none():
+    # Проверить что email не занят (без учёта регистра).
+    # Семантику намеренно не меняем — deleted-аккаунты по-прежнему считаются
+    # занявшими адрес; правим только падение на дубле (.first() вместо
+    # .scalar_one_or_none(), иначе MultipleResultsFound → 500).
+    existing = await db.execute(
+        select(User).where(func.lower(User.email) == email_lower).order_by(User.id)
+    )
+    if existing.scalars().first():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='This email is already registered',
@@ -1685,10 +1694,20 @@ async def login_email(
     # Check if this is a test email login
     is_test_email = settings.is_test_email(request.email)
 
-    # Find user by email (case-insensitive)
+    # Find user by email (case-insensitive, exclude deleted).
+    # Deleted отсекаем здесь, а не ниже по коду: иначе soft-deleted дубль с
+    # меньшим id перекрывал бы живой аккаунт и клиент получал 401 при верном
+    # пароле. .first() — чтобы дубль давал штатный ответ, а не 500.
     email_lower = (request.email or '').strip().lower()
-    result = await db.execute(select(User).where(func.lower(User.email) == email_lower))
-    user = result.scalar_one_or_none()
+    result = await db.execute(
+        select(User)
+        .where(
+            func.lower(User.email) == email_lower,
+            User.status != UserStatus.DELETED.value,
+        )
+        .order_by(User.id)
+    )
+    user = result.scalars().first()
 
     if not user:
         # For test email - auto-create user if not exists
@@ -1938,8 +1957,15 @@ async def forgot_password(
             headers={'Retry-After': '60'},
         )
     email_lower = (request.email or '').strip().lower()
-    result = await db.execute(select(User).where(func.lower(User.email) == email_lower))
-    user = result.scalar_one_or_none()
+    result = await db.execute(
+        select(User)
+        .where(
+            func.lower(User.email) == email_lower,
+            User.status != UserStatus.DELETED.value,
+        )
+        .order_by(User.id)
+    )
+    user = result.scalars().first()
 
     # Always return success to prevent email enumeration
     if not user:
